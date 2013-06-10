@@ -1,0 +1,102 @@
+.main{
+	font-family:'Open Sans';
+	background:url('../img/bg.jpg');
+	width:960px;
+	height:1250px;
+}
+
+.main h1{
+	text-transform:uppercase;
+}
+
+.main h1,
+.main h2{
+	color:#FFFFFF;
+	position:absolute;
+	top:80px;
+	left:560px;
+	font-size:33px;
+}
+
+.main h2{
+	top:130px;
+	left:375px;
+	font-size:14px;
+	font-weight:normal;
+	line-height:22px;
+	width:530px;
+	text-align:right;
+}
+
+.subway{
+	width:830px;
+	height:830px;
+	position:relative;
+	top:355px;
+	left:65px;
+}
+
+.subway a{
+	display:block;
+	width:30px;
+	height:30px;
+	/*background:#000;
+	opacity:0.4;*/
+	position:absolute;
+}
+
+.modal{
+	width:510px;
+}
+
+/* LINHA VERMELHA */
+.beleleu{left:222px;top:72px;}
+.aspropriascustas{left:222px;top:150px;}
+.sampamidnight{left:222px;top:207px;}
+.intercontinental{left:222px;top:270px;}
+.orquideas{left:222px;top:335px;}
+.prasempreagora{left:222px;top:390px;}
+.pretobras{left:222px;top:445px;}
+.repercussao{left:222px;top:500px;}
+
+/* LINHA AMARELA */
+
+.estropicio{left:342px;top:72px;}
+.maslinguas{left:505px;top:72px;}
+.parecequebebe{left:505px;top:195px;}
+.lirapaulistana{left:505px;top:265px;}
+.ondasertaneja{left:505px;top:330px;}
+.marleydavis{left:630px;top:335px;}
+.intimo{left:630px;top:400px;}
+.dorelegante{left:630px;top:467px;}
+.terapiaintensiva{left:630px;top:535px;}
+
+/* LINHA AZUL */
+
+.vidadeartista{left:682px;top:70px;}
+.iscadepolicia1{left:682px;top:110px;}
+.iscadepolicia2{left:682px;top:150px;}
+.linhadebaixo{left:682px;top:192px;}
+.lerolero{left:616px;top:192px;}
+.cumbica{left:385px;top:195px;}
+.berlim{left:385px;top:248px;}
+.quemdescobriu{left:385px;top:300px;}
+.leminski{left:385px;top:375px;}
+.zdaquestao{left:385px;top:417px;}
+.ritmoepoesia{left:385px;top:462px;}
+.malditovirgula{left:385px;top:510px;}
+
+/* LINHA ROXA */
+
+.luzia{left:88px;top:253px;}
+.meunegocioemulher{left:88px;top:333px;}
+.elzasoares{left:475px;top:376px;}
+
+/* LINHA VERDE */
+
+.estarrecer{left:23px;top:555px;}
+.aprendizdefeiticeiro{left:112px;top:555px;}
+.oucame{left:188px;top:555px;}
+.sucexnaoefax{left:383px;top:555px;}
+.caixapreta{left:445px;top:555px;}
+.prezadissimosouvintes{left:445px;top:607px;}

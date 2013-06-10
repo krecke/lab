@@ -1,0 +1,2 @@
+- Importar textos que o Anderson irá passar
+- Pegar texto de descrição abaixo do título
