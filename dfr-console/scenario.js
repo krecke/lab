@@ -160,7 +160,7 @@
         buildings: [
           { id: 'warehouse', label: 'Speicherhof Nord', rect: [835, 140, 50, 32], roof: 0.2 },
           { id: 'house12', label: 'No. 12', rect: [800, 170, 14, 16], roof: 0.32 },
-          { id: 'house10', label: 'No. 10 (caller)', rect: [778, 172, 16, 14], roof: 0.34 }
+          { id: 'house10', label: 'No. 10', rect: [778, 172, 16, 14], roof: 0.34 }
         ],
         apron: [842, 172, 30, 12],
         pallets: [864, 175, 5, 4],
@@ -168,9 +168,9 @@
           { id: 'garden12', label: 'Private garden, no. 12', private: true, pts: [[798, 140], [818, 140], [818, 168], [798, 168]] },
           { id: 'garden10', label: 'Garden, no. 10', private: true, pts: [[776, 142], [796, 142], [796, 170], [776, 170]] }
         ],
-        trees: [[812, 148, 3.2], [781, 150, 3], [790, 158, 2.4]],
+        trees: [[810, 150.5, 2.4], [781, 150, 3], [790, 160, 2.4]],
         sideGate: [898, 182],
-        siteLabel: { text: 'Lagerweg 14', x: 860, y: 124 }
+        siteLabel: { text: 'Lagerweg 14', x: 906, y: 124 }
       }
     },
 
@@ -215,9 +215,9 @@
     ],
 
     detections: {
-      'D-01': { entity: 'veh', kind: 'Vehicle', label: 'Vehicle inside side gate, engine warm', size: [7, 4], confidence: 0.88,
+      'D-01': { entity: 'veh', kind: 'Vehicle', label: 'Vehicle at side gate, engine warm', size: [7, 4], confidence: 0.88,
         evidence: 'Engine block 41 °C above ambient. Lights off. Parked inside the fence by the side gate.' },
-      'D-02': { entity: 'g1', kind: 'Person?', label: 'Person-shaped heat signature, private garden of no. 12', size: [3.4, 3.4], confidence: 0.41, needsHuman: true, privateArea: 'garden12',
+      'D-02': { entity: 'g1', kind: 'Person?', label: 'Person-shaped heat signature, private garden', size: [3.4, 3.4], confidence: 0.41, needsHuman: true, privateArea: 'garden12',
         evidence: 'Upright, about 1.7 m, still for 15 s. Half behind a tree. Could be a resident or one of the reported people.' },
       'D-03': { entity: 'p1', kind: 'Person', label: 'Person at loading bay', size: [3, 3], confidence: 0.72,
         evidence: 'Moving between the bay and the shutter. Small hot spot at hand height, consistent with a torch.' },
@@ -228,15 +228,15 @@
     },
 
     unknowns: {
-      'U-01': 'Whether anyone is inside the warehouse. The roof blocks thermal; the drone cannot see in.',
+      'U-01': 'Whether anyone is inside. The roof blocks thermal imaging.',
       'U-02': 'Whether the vehicle at the side gate belongs to the people at the bay.',
-      'U-03': 'Who the figure in the garden of no. 12 is: a resident or one of the reported people. The system will not decide this.',
-      'U-04': 'How many people are involved. Caller said two; the drone sees two at the bay and one more in the garden.',
-      'U-05': 'The north and east sides of the building have not been observed yet.'
+      'U-03': 'Whether the garden figure is a resident or a suspect. The system will not decide.',
+      'U-04': 'How many people: caller said two; drone sees two at the bay plus one in the garden.',
+      'U-05': 'North and east sides of the building not yet observed.'
     },
 
     brief: {
-      lookingAt: 'Speicherhof Nord, a closed warehouse, from a 60 m orbit: two people at the south loading bay, a warm vehicle at the side gate, and one uncertain figure in the back garden of no. 12 next door.'
+      lookingAt: 'Speicherhof Nord, a closed warehouse, from a 60 m orbit: two people at the loading bay, a warm vehicle at the side gate, and one uncertain figure in the garden next door.'
     },
 
     /* Decisions waiting for the human, most urgent first. Shown from handover. */
@@ -244,7 +244,7 @@
       {
         id: 'DEC-1', urgency: 'Most urgent', requires: { detected: 'D-02' },
         title: 'Figure in a private garden',
-        text: 'Person-shaped heat signature in the back garden of no. 12, confidence Low · 0.41. The camera is recording into the garden while it is in frame.',
+        text: 'Suspect or resident? The camera records into the garden while it is in frame.',
         kind: 'garden',
         choices: [
           { choice: 'AWAY', label: 'Point camera away', note: 'Privacy first. The garden is masked and the figure stays unresolved.' },
@@ -255,7 +255,7 @@
       {
         id: 'DEC-2', urgency: 'Next',
         title: 'Share the live feed with P-14?',
-        text: 'The unit would see the bay before arriving. The feed includes the garden of no. 12 while it is in frame.',
+        text: 'The unit sees the bay before it arrives. The feed includes the garden while it is in frame.',
         kind: 'share'
       }
     ],
@@ -263,40 +263,40 @@
     /* Suggested first actions. Shown from handover; never run on their own. */
     suggestions: [
       { id: 'S-1', text: 'Point the camera at the loading bay, zoom 2×.', action: { type: 'OP_POINT', x: 857, y: 177, label: 'loading bay', zoom: 2 } },
-      { id: 'S-2', text: 'Mark the vehicle at the side gate as a point of interest for P-14.', action: { type: 'OP_MARK_POI', x: 889, y: 183, label: 'Vehicle at side gate' } },
-      { id: 'S-3', text: 'Look at the north side of the building, which has not been seen yet.', action: { type: 'OP_POINT', x: 860, y: 140, label: 'north side of building' } }
+      { id: 'S-2', text: 'Mark the side-gate vehicle as a point for P-14.', action: { type: 'OP_MARK_POI', x: 889, y: 183, label: 'Vehicle at side gate' } },
+      { id: 'S-3', text: 'Look at the north side, not yet seen.', action: { type: 'OP_POINT', x: 860, y: 140, label: 'north side of building' } }
     ],
 
     /* Scripted timeline. System events only; operator events come from clicks.
-       brief: true puts the entry in the handover brief's "since launch" list. */
+       brief: '<short text>' puts the entry in the handover brief's "since launch" list. */
     events: [
       { anchor: 'T', at: 3, type: 'policy_check' },
       { anchor: 'T', at: 5, type: 'launch_gate' },
 
-      { anchor: 'L', at: 3, type: 'log', brief: true, rule: 'AIR-03',
+      { anchor: 'L', at: 3, type: 'log', brief: 'Routed around helipad no-fly zone (+70 m)', rule: 'AIR-03',
         action: 'Set route around the St. Aldric helipad no-fly zone (+70 m)',
         reason: 'Direct line crosses NFZ-07 (hospital helipad, 200 m radius).' },
-      { anchor: 'L', at: 8, type: 'log', brief: true,
+      { anchor: 'L', at: 8, type: 'log',
         action: 'Reached cruise altitude 60 m',
         reason: 'Standard transit altitude for this sector.' },
-      { anchor: 'L', at: 20, type: 'log', brief: true,
+      { anchor: 'L', at: 20, type: 'log',
         action: 'Loaded site layout for Lagerweg 14',
         reason: 'Building record attached to the incident address.' },
       { anchor: 'L', at: 20, type: 'unknown', id: 'U-01' },
       { anchor: 'L', at: 48, type: 'link', value: 78 },
       { anchor: 'L', at: 52, type: 'link', value: 91 },
-      { anchor: 'L', at: 52, type: 'log', brief: true,
+      { anchor: 'L', at: 52, type: 'log', brief: 'Switched link relay (78% → 91%)',
         action: 'Switched data link relay R2 → R4 (78% → 91%)',
         reason: 'Link quality fell below 80% near Kanalstraße.' },
       { anchor: 'L', at: 75, type: 'camera_auto', mode: 'SITE' },
-      { anchor: 'L', at: 75, type: 'log', brief: true, rule: 'DFR-C1',
+      { anchor: 'L', at: 75, type: 'log', brief: 'Pointed camera at the site', rule: 'DFR-C1',
         action: 'Pointed camera at the incident address',
         reason: 'Within 400 m of the site on approach.' },
       { anchor: 'L', at: 80, type: 'detect', id: 'D-01' },
       { anchor: 'L', at: 80, type: 'unknown', id: 'U-02' },
       { anchor: 'L', at: 95, type: 'detect', id: 'D-02' },
       { anchor: 'L', at: 95, type: 'unknown', id: 'U-03' },
-      { anchor: 'L', at: 96, type: 'log', brief: true, rule: 'DFR-P2',
+      { anchor: 'L', at: 96, type: 'log', brief: 'Queued garden detection for you; no action', rule: 'DFR-P2',
         action: 'Queued garden detection for the operator; took no action on it',
         reason: 'Low confidence (0.41) and inside private property.' },
       { anchor: 'L', at: 110, type: 'detect', id: 'D-03' },

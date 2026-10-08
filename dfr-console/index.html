@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1440">
+  <title>DFR Handover Console</title>
+  <meta name="description" content="Prototype operator console for a drone-as-first-responder programme. A design exploration of human oversight at the moment of handover. Fictional city, units and procedures.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app" id="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <div class="brand-name">DFR Console</div>
+          <div class="brand-sub">Kessmar Ops · Night shift · Prototype</div>
+        </div>
+      </div>
+
+      <div class="mode" id="mode" role="radiogroup" aria-label="Oversight mode"></div>
+
+      <div class="control" id="control" aria-live="polite"></div>
+
+      <div class="chips">
+        <div class="chip chip-rec" id="rec" aria-live="polite"></div>
+        <div class="chip chip-fr" title="Facial recognition is not part of this programme. Identity is never inferred from the feed.">
+          <span class="chip-k">Facial recognition</span>
+          <span class="chip-v"><span class="strike">FR</span> Disabled by design</span>
+        </div>
+      </div>
+
+      <div class="clock">
+        <div class="clock-time num" data-live="clock">--:--:--</div>
+        <div class="clock-sub num"><span data-live="tplus">T+0:00</span><span class="condensed" id="condensed" hidden>Condensed <span data-live="condense-x"></span></span></div>
+      </div>
+
+      <button class="btn btn-ghost audit-btn" data-action="toggle-audit" aria-controls="audit">
+        Audit trail <span class="count num" id="audit-count">0</span> <kbd>A</kbd>
+      </button>
+    </header>
+
+    <main class="grid" id="grid">
+      <aside class="col-left" id="left" aria-label="Incident"></aside>
+
+      <section class="col-center" aria-label="Map and camera">
+        <div class="panel map-panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Map <span class="dim">· Kessmar-Ostfeld · stylised, not to survey</span></h2>
+            <div class="seg seg-sm" id="map-view"></div>
+          </div>
+          <div class="map-wrap" id="map-wrap">
+            <svg id="map" role="img" aria-label="Map of the drone route, no-fly zone, site and patrol position"></svg>
+            <div class="arm-hint" id="map-hint" hidden></div>
+          </div>
+        </div>
+        <div class="panel feed-panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Camera <span class="dim">· DR-03 · simulated thermal, top-down</span></h2>
+            <div class="feed-flags" id="feed-flags"></div>
+          </div>
+          <div class="feed-wrap" id="feed-wrap">
+            <canvas id="feed" aria-label="Simulated thermal camera feed with detection boxes"></canvas>
+            <div class="arm-hint" id="feed-hint" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="col-right" id="context" aria-label="What needs you"></aside>
+
+      <section class="closeout" id="closeout" hidden aria-label="Close-out summary"></section>
+    </main>
+
+    <footer class="playback" id="playback" aria-label="Playback"></footer>
+
+    <aside class="drawer" id="audit" hidden aria-label="Audit trail"></aside>
+  </div>
+
+  <script src="scenario.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
