@@ -1710,14 +1710,41 @@
   }
 
   /* ---- thermal feed -------------------------------------------------------- */
-  /* Canvas colours come from the CSS tokens so the stylesheet is the only palette. */
-  var C = {};
+  /* Canvas colours come from the CSS tokens (styles.css, section 1), so the
+     stylesheet is the only place the palette lives. */
+  var C = {}, TINT = [1, 1, 1];
   function readTheme() {
     var cs = getComputedStyle(document.documentElement);
-    ['sys', 'ask', 'crit', 'text', 'text-2', 'text-3', 'bg'].forEach(function (k) { C[k] = cs.getPropertyValue('--' + k).trim(); });
-    C.hud = 'rgba(13,15,10,0.82)';
-    C.tag = 'rgba(13,15,10,0.9)';
+    function v(k) { return cs.getPropertyValue('--' + k).trim(); }
+    ['sys', 'ask', 'crit', 'text', 'text-2', 'text-3', 'feed-bg', 'feed-hud', 'feed-tag', 'feed-mask', 'feed-mask-hatch', 'feed-reticle']
+      .forEach(function (k) { C[k] = v(k); });
+    var t = v('thermal-tint').split(/\s+/).map(Number);
+    if (t.length === 3 && t.every(function (n) { return !isNaN(n); })) TINT = t;
+    makeCamo([v('camo-base'), v('camo-1'), v('camo-2'), v('camo-3')]);
   }
+
+  /* Pixel camo tile for the top bar, built from the --camo-* tokens.
+     Deterministic: the same tokens always give the same pattern. */
+  function makeCamo(tones) {
+    var N = 16, px = 4, seed = 7, g = [], y, x;
+    function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+    for (y = 0; y < N; y++) { g.push([]); for (x = 0; x < N; x++) g[y].push(0); }
+    [[1, 9], [2, 7], [3, 5]].forEach(function (tc) {
+      for (var i = 0; i < tc[1]; i++) {
+        var cx = Math.floor(rnd() * N), cy = Math.floor(rnd() * N), len = 5 + Math.floor(rnd() * 8);
+        for (var j = 0; j < len; j++) {
+          g[((cy % N) + N) % N][((cx % N) + N) % N] = tc[0];
+          var d = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1]][Math.floor(rnd() * 5)];
+          cx += d[0]; cy += d[1];
+        }
+      }
+    });
+    var c = document.createElement('canvas'); c.width = c.height = N * px;
+    var x2 = c.getContext('2d');
+    for (y = 0; y < N; y++) for (x = 0; x < N; x++) { x2.fillStyle = tones[g[y][x]] || tones[0]; x2.fillRect(x * px, y * px, px, px); }
+    document.documentElement.style.setProperty('--camo', 'url("' + c.toDataURL('image/png') + '")');
+  }
+
   var feedCtx = null, noiseCanvas = null;
 
   function makeNoise() {
@@ -1732,10 +1759,10 @@
     return c;
   }
 
-  /* White-hot thermal with a slight sand cast. */
+  /* White-hot thermal, tinted by --thermal-tint. */
   function gray(v, a) {
     v = clamp(v, 0, 255);
-    var rgb = Math.round(v) + ',' + Math.round(v * 0.975) + ',' + Math.round(v * 0.89);
+    var rgb = Math.round(v * TINT[0]) + ',' + Math.round(v * TINT[1]) + ',' + Math.round(v * TINT[2]);
     return a == null ? 'rgb(' + rgb + ')' : 'rgba(' + rgb + ',' + a + ')';
   }
 
@@ -1813,8 +1840,8 @@
     if (s.garden.choice === 'AWAY') {
       var pa = privateArea(s);
       ctx.save(); poly(pa.pts); ctx.clip();
-      ctx.fillStyle = 'rgb(16,18,12)'; ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = 'rgba(196,185,159,0.35)'; ctx.lineWidth = 1;
+      ctx.fillStyle = C['feed-mask']; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = C['feed-mask-hatch']; ctx.lineWidth = 1;
       for (var hx = -H; hx < W; hx += 8) { ctx.beginPath(); ctx.moveTo(hx, H); ctx.lineTo(hx + H, 0); ctx.stroke(); }
       ctx.restore();
       if (opts.overlay) {
@@ -1880,7 +1907,7 @@
   function label(ctx, x, y, text, col, plain) {
     ctx.font = '600 11px ' + MONO;
     var w = ctx.measureText(text).width;
-    ctx.fillStyle = C.tag;
+    ctx.fillStyle = C['feed-tag'];
     ctx.fillRect(x - 3, y - 12, w + 6, 16);
     ctx.fillStyle = col;
     ctx.fillText(text, x, y);
@@ -1911,7 +1938,7 @@
     ui.feedXf = null;
 
     if (!s.airborne) {
-      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = C['feed-bg']; ctx.fillRect(0, 0, W, H);
       var msg = s.status === 'IDLE' ? 'NO ACTIVE INCIDENT' : s.status === 'CLOSED' ? 'DR-03 DOCKED · FEED ENDED' : s.status === 'PATROL_ONLY' ? 'DR-03 NOT LAUNCHED · NO FEED' : 'DR-03 DOCKED · NO LIVE FEED';
       ctx.font = '600 12px ' + MONO; ctx.fillStyle = C['text-3']; ctx.textAlign = 'center';
       ctx.fillText(msg, W / 2, H / 2); ctx.textAlign = 'left';
@@ -1921,7 +1948,7 @@
     ui.feedXf = drawScene(ctx, W, H, view, s, { overlay: true, noise: true });
     ui.feedView = view;
     // reticle
-    ctx.strokeStyle = 'rgba(233,226,207,0.35)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = C['feed-reticle']; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(W / 2 - 10, H / 2); ctx.lineTo(W / 2 - 4, H / 2); ctx.moveTo(W / 2 + 4, H / 2); ctx.lineTo(W / 2 + 10, H / 2);
     ctx.moveTo(W / 2, H / 2 - 10); ctx.lineTo(W / 2, H / 2 - 4); ctx.moveTo(W / 2, H / 2 + 4); ctx.lineTo(W / 2, H / 2 + 10); ctx.stroke();
     hud(ctx, W, H, s, ui.feedXf.k);
@@ -1930,7 +1957,7 @@
   function hud(ctx, W, H, s, k) {
     var sc = s.sc;
     ctx.font = '600 11px ' + MONO;
-    ctx.fillStyle = C.hud; ctx.fillRect(0, 0, W, 22); ctx.fillRect(0, H - 22, W, 22);
+    ctx.fillStyle = C['feed-hud']; ctx.fillRect(0, 0, W, 22); ctx.fillRect(0, H - 22, W, 22);
     ctx.fillStyle = C['text-2'];
     var mode = s.airborne ? phaseLabel(s).toUpperCase() : 'DOCKED';
     ctx.fillText((s.airborne ? 'LIVE · ' : '') + sc.drone.id + ' THERMAL · ' + mode + ' · ZOOM ' + s.camera.zoom + '×', 8, 15);
