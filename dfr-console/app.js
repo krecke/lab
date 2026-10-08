@@ -1559,6 +1559,8 @@
       '</defs>';
     h += '<rect x="-2000" y="-2000" width="5000" height="5000" class="m-bg"/>';
     h += '<polygon class="m-river" points="' + ptsAttr(m.river) + '"/>';
+    for (var gx = 0; gx <= 1000; gx += 100) h += '<line class="m-grid" x1="' + gx + '" y1="-10" x2="' + gx + '" y2="630"/>';
+    for (var gy = 0; gy <= 600; gy += 100) h += '<line class="m-grid" x1="-10" y1="' + gy + '" x2="1010" y2="' + gy + '"/>';
     m.blocks.forEach(function (b) { h += '<rect class="m-block" x="' + b[0] + '" y="' + b[1] + '" width="' + b[2] + '" height="' + b[3] + '"/>'; });
     m.streets.forEach(function (st) { h += '<polyline class="m-street" stroke-width="' + st.w + '" points="' + ptsAttr(st.pts) + '"/>'; });
     m.landmarks.forEach(function (l) {
@@ -1583,6 +1585,8 @@
     var L = function (x, y, text, cls, rot) {
       return '<g transform="translate(' + x + ' ' + y + ')' + (rot ? ' rotate(' + rot + ')' : '') + '"><g class="mk"><text class="lbl ' + (cls || '') + '">' + esc(text) + '</text></g></g>';
     };
+    for (var ci = 0; ci < 10; ci++) h += L(ci * 100 + 50, 4, 'ABCDEFGHJK'.charAt(ci), 'lbl-area lbl-grid');
+    for (var ri = 0; ri < 6; ri++) h += L(-2, ri * 100 + 54, String(ri + 1), 'lbl-area lbl-grid');
     m.labels.forEach(function (l) { h += L(l.x, l.y, l.text, 'lbl-area', l.rotate); });
     m.landmarks.forEach(function (l) { h += L(l.rect[0] + l.rect[2] / 2, l.rect[1] - 6, l.label, 'lbl-area lbl-mark'); });
     m.noFly.forEach(function (z) { h += L(z.cx, z.cy - z.r - 6, z.label, 'lbl-area lbl-nfz'); });
@@ -1706,6 +1710,14 @@
   }
 
   /* ---- thermal feed -------------------------------------------------------- */
+  /* Canvas colours come from the CSS tokens so the stylesheet is the only palette. */
+  var C = {};
+  function readTheme() {
+    var cs = getComputedStyle(document.documentElement);
+    ['sys', 'ask', 'crit', 'text', 'text-2', 'text-3', 'bg'].forEach(function (k) { C[k] = cs.getPropertyValue('--' + k).trim(); });
+    C.hud = 'rgba(13,15,10,0.82)';
+    C.tag = 'rgba(13,15,10,0.9)';
+  }
   var feedCtx = null, noiseCanvas = null;
 
   function makeNoise() {
@@ -1720,7 +1732,12 @@
     return c;
   }
 
-  function gray(v, a) { v = Math.round(clamp(v, 0, 255)); return a == null ? 'rgb(' + v + ',' + v + ',' + v + ')' : 'rgba(' + v + ',' + v + ',' + v + ',' + a + ')'; }
+  /* White-hot thermal with a slight sand cast. */
+  function gray(v, a) {
+    v = clamp(v, 0, 255);
+    var rgb = Math.round(v) + ',' + Math.round(v * 0.975) + ',' + Math.round(v * 0.89);
+    return a == null ? 'rgb(' + rgb + ')' : 'rgba(' + rgb + ',' + a + ')';
+  }
 
   /* Draws the simulated thermal scene for a world-space view into ctx. */
   function drawScene(ctx, W, H, view, s, opts) {
@@ -1796,13 +1813,13 @@
     if (s.garden.choice === 'AWAY') {
       var pa = privateArea(s);
       ctx.save(); poly(pa.pts); ctx.clip();
-      ctx.fillStyle = 'rgb(16,19,24)'; ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = 'rgba(178,187,199,0.35)'; ctx.lineWidth = 1;
+      ctx.fillStyle = 'rgb(16,18,12)'; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(196,185,159,0.35)'; ctx.lineWidth = 1;
       for (var hx = -H; hx < W; hx += 8) { ctx.beginPath(); ctx.moveTo(hx, H); ctx.lineTo(hx + H, 0); ctx.stroke(); }
       ctx.restore();
       if (opts.overlay) {
         var bb = polyBBox(pa.pts);
-        label(ctx, X(bb.x0) + 4, Y((bb.y0 + bb.y1) / 2), 'PRIVATE AREA · MASKED BY OPERATOR', '#b2bbc7', true);
+        label(ctx, X(bb.x0) + 4, Y((bb.y0 + bb.y1) / 2), 'PRIVATE AREA · MASKED BY OPERATOR', C['text-2'], true);
       }
     }
 
@@ -1814,7 +1831,7 @@
         if (d.privateArea && s.garden.choice === 'AWAY') return;
         var ent = entityById(s, d.entity), p = entityAt(s, ent);
         if (!p) return;
-        var col = d.needsHuman ? '#f2b545' : d.verifiedBy ? '#e7ebf0' : '#4cc3e0';
+        var col = d.needsHuman ? C.ask : d.verifiedBy ? C.text : C.sys;
         var w = d.size[0] * k, h = d.size[1] * k, x0 = X(p.x) - w / 2, y0 = Y(p.y) - h / 2;
         brackets(ctx, x0, y0, w, h, col, d.needsHuman ? 2 : 1.5);
         var txt = id + ' ' + d.kind.toUpperCase() + ' · ' + fmtConf(d.confidence, d.verifiedBy).toUpperCase();
@@ -1827,16 +1844,16 @@
       });
       s.pois.forEach(function (p) {
         var x = X(p.x), y = Y(p.y);
-        ctx.strokeStyle = '#e7ebf0'; ctx.lineWidth = 1.5;
+        ctx.strokeStyle = C.text; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x + 7, y); ctx.lineTo(x, y + 7); ctx.lineTo(x - 7, y); ctx.closePath(); ctx.stroke();
-        label(ctx, x + 10, y + 4, p.id + ' ' + p.label.toUpperCase(), '#e7ebf0');
+        label(ctx, x + 10, y + 4, p.id + ' ' + p.label.toUpperCase(), C.text);
       });
     }
     if (opts.box) {
       var bd = opts.box, be = entityAt(s, entityById(s, bd.entity));
       if (be) {
         var bw = bd.size[0] * k, bh = bd.size[1] * k;
-        brackets(ctx, X(be.x) - bw / 2, Y(be.y) - bh / 2, bw, bh, bd.needsHuman ? '#f2b545' : '#4cc3e0', 1.5);
+        brackets(ctx, X(be.x) - bw / 2, Y(be.y) - bh / 2, bw, bh, bd.needsHuman ? C.ask : C.sys, 1.5);
       }
     }
     // vignette
@@ -1863,7 +1880,7 @@
   function label(ctx, x, y, text, col, plain) {
     ctx.font = '600 11px ' + MONO;
     var w = ctx.measureText(text).width;
-    ctx.fillStyle = 'rgba(11,14,18,0.88)';
+    ctx.fillStyle = C.tag;
     ctx.fillRect(x - 3, y - 12, w + 6, 16);
     ctx.fillStyle = col;
     ctx.fillText(text, x, y);
@@ -1894,9 +1911,9 @@
     ui.feedXf = null;
 
     if (!s.airborne) {
-      ctx.fillStyle = '#0d1014'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
       var msg = s.status === 'IDLE' ? 'NO ACTIVE INCIDENT' : s.status === 'CLOSED' ? 'DR-03 DOCKED · FEED ENDED' : s.status === 'PATROL_ONLY' ? 'DR-03 NOT LAUNCHED · NO FEED' : 'DR-03 DOCKED · NO LIVE FEED';
-      ctx.font = '600 12px ' + MONO; ctx.fillStyle = '#8c96a3'; ctx.textAlign = 'center';
+      ctx.font = '600 12px ' + MONO; ctx.fillStyle = C['text-3']; ctx.textAlign = 'center';
       ctx.fillText(msg, W / 2, H / 2); ctx.textAlign = 'left';
       hud(ctx, W, H, s);
       return;
@@ -1904,7 +1921,7 @@
     ui.feedXf = drawScene(ctx, W, H, view, s, { overlay: true, noise: true });
     ui.feedView = view;
     // reticle
-    ctx.strokeStyle = 'rgba(231,235,240,0.35)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(233,226,207,0.35)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(W / 2 - 10, H / 2); ctx.lineTo(W / 2 - 4, H / 2); ctx.moveTo(W / 2 + 4, H / 2); ctx.lineTo(W / 2 + 10, H / 2);
     ctx.moveTo(W / 2, H / 2 - 10); ctx.lineTo(W / 2, H / 2 - 4); ctx.moveTo(W / 2, H / 2 + 4); ctx.lineTo(W / 2, H / 2 + 10); ctx.stroke();
     hud(ctx, W, H, s, ui.feedXf.k);
@@ -1913,22 +1930,22 @@
   function hud(ctx, W, H, s, k) {
     var sc = s.sc;
     ctx.font = '600 11px ' + MONO;
-    ctx.fillStyle = 'rgba(11,14,18,0.78)'; ctx.fillRect(0, 0, W, 22); ctx.fillRect(0, H - 22, W, 22);
-    ctx.fillStyle = '#b2bbc7';
+    ctx.fillStyle = C.hud; ctx.fillRect(0, 0, W, 22); ctx.fillRect(0, H - 22, W, 22);
+    ctx.fillStyle = C['text-2'];
     var mode = s.airborne ? phaseLabel(s).toUpperCase() : 'DOCKED';
     ctx.fillText((s.airborne ? 'LIVE · ' : '') + sc.drone.id + ' THERMAL · ' + mode + ' · ZOOM ' + s.camera.zoom + '×', 8, 15);
     var rec = s.recording ? '● REC ' + clockAt(s) : '○ NOT RECORDING';
-    ctx.fillStyle = s.recording ? '#e7ebf0' : '#8c96a3';
+    ctx.fillStyle = s.recording ? C.text : C['text-3'];
     ctx.textAlign = 'right'; ctx.fillText(rec, W - 8, 15);
-    ctx.fillStyle = '#8c96a3';
+    ctx.fillStyle = C['text-3'];
     ctx.fillText(s.feedShared ? 'FEED SHARED WITH ' + sc.patrol.id : 'FEED NOT SHARED', W - 8, H - 7);
     ctx.textAlign = 'left';
     ctx.fillText('FACIAL RECOGNITION: DISABLED BY DESIGN', 8, H - 7);
     if (k) {
       var m20 = 20 / sc.map.metresPerUnit * k, bx = W - 18 - m20, by = H - 30;
-      ctx.strokeStyle = '#b2bbc7'; ctx.lineWidth = 1;
+      ctx.strokeStyle = C['text-2']; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(bx, by - 3); ctx.lineTo(bx, by); ctx.lineTo(bx + m20, by); ctx.lineTo(bx + m20, by - 3); ctx.stroke();
-      ctx.textAlign = 'center'; ctx.fillStyle = '#e7ebf0'; ctx.fillText('20 m', bx + m20 / 2, by - 5); ctx.textAlign = 'left';
+      ctx.textAlign = 'center'; ctx.fillStyle = C.text; ctx.fillText('20 m', bx + m20 / 2, by - 5); ctx.textAlign = 'left';
     }
   }
 
@@ -2043,6 +2060,7 @@
     var id = window.DFR_SCENARIO_ID, sc = window.DFR_SCENARIOS && window.DFR_SCENARIOS[id];
     if (!sc) { document.body.textContent = 'Scenario "' + id + '" not found.'; return; }
     App.sc = sc;
+    readTheme();
     noiseCanvas = makeNoise();
     newState();
     buildMapStatic();

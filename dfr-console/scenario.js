@@ -159,8 +159,8 @@
         fence: [822, 128, 76, 64],
         buildings: [
           { id: 'warehouse', label: 'Speicherhof Nord', rect: [835, 140, 50, 32], roof: 0.2 },
-          { id: 'house12', label: 'No. 12', rect: [800, 170, 14, 16], roof: 0.32 },
-          { id: 'house10', label: 'No. 10', rect: [778, 172, 16, 14], roof: 0.34 }
+          { id: 'house12', label: '12', rect: [800, 170, 14, 16], roof: 0.32 },
+          { id: 'house10', label: '10', rect: [778, 172, 16, 14], roof: 0.34 }
         ],
         apron: [842, 172, 30, 12],
         pallets: [864, 175, 5, 4],
