@@ -122,6 +122,7 @@
         camera: { target: null, zoom: 1 },
         garden: { choice: 'PENDING', history: [] },
         feedShared: false,
+        shareDecided: false,
         pois: [],
         detections: {}, detOrder: [],
         unknowns: {}, unkOrder: [],
@@ -448,9 +449,17 @@
         case 'OP_SHARE_FEED':
           if (!operatorHasControl(s) || !!a.on === s.feedShared) return false;
           s.feedShared = !!a.on;
+          s.shareDecided = true;
           log(s, 'OPERATOR', a.on ? 'Shared the live feed with ' + sc.patrol.id : 'Stopped sharing the feed with ' + sc.patrol.id,
             a.reason || ('Operator decision. Garden of no. 12 is ' + (gardenInFrame(s) ? 'in frame.' : 'out of frame or masked.')));
           if (a.on && s.pois.length) log(s, 'SYSTEM', 'Sent ' + s.pois.length + ' marked point(s) to ' + sc.patrol.id, 'Feed sharing started.');
+          return true;
+
+        case 'OP_SHARE_DECLINE':
+          if (!operatorHasControl(s) || s.shareDecided) return false;
+          s.shareDecided = true;
+          log(s, 'OPERATOR', 'Decided not to share the feed with ' + sc.patrol.id,
+            a.reason || 'Operator decision. Sharing stays available from the live view.');
           return true;
 
         case 'OP_RECORD':
@@ -685,6 +694,23 @@
 
   function suggestionsVisible(s) { return s.anchors.A != null; }
 
+  /* The one thing the operator should do now. At most one primary action per state.
+     kind: approve | take-control | garden | share | end | wait | none */
+  function nextAction(s) {
+    switch (s.status) {
+      case 'LAUNCH_GATE': return { kind: s.mode === 'INTERACTIVE' ? 'approve' : 'wait' };
+      case 'HANDOVER': return { kind: 'take-control' };
+      case 'ON_SCENE':
+        if (s.detections['D-02'] && s.garden.choice === 'PENDING') return { kind: 'garden' };
+        if (!s.shareDecided) return { kind: 'share' };
+        if (s.anchors.P != null) return { kind: 'end' };
+        return { kind: 'wait' };
+      case 'PATROL_ONLY': return { kind: s.anchors.P != null ? 'end' : 'wait' };
+      case 'IDLE': case 'CLOSED': return { kind: 'none' };
+    }
+    return { kind: 'wait' };
+  }
+
   function gardenOutcomeKey(s) {
     if (s.anchors.L == null) return 'NO_DRONE';
     return s.garden.choice;
@@ -810,9 +836,9 @@
       renderTopbar(s);
       renderLeft(s);
       renderContext(s);
-      renderPlayback(s);
+      renderHarness(s);
       renderMapDiscrete(s);
-      renderFeedFlags(s);
+      renderFeedTools(s);
       renderAudit(s);
       renderCloseout(s);
       renderHints();
@@ -899,23 +925,22 @@
       '<span class="ctl-sub">' + esc(c.sub) + '</span>';
 
     $('rec').className = 'chip chip-rec' + (s.recording ? ' on' : '');
-    $('rec').innerHTML = '<span class="chip-k">Camera recording</span><span class="chip-v"><span class="rec-dot" aria-hidden="true"></span>' +
+    $('rec').innerHTML = '<span class="chip-k">Recording</span><span class="chip-v"><span class="rec-dot" aria-hidden="true"></span>' +
       (s.recording ? 'REC · On' : 'Off') + '</span>';
 
     $('audit-count').textContent = s.audit.length;
   }
 
-  /* ---- left column: incident, steps, telemetry -------------------------- */
+  /* ---- left column: incident and steps ----------------------------------- */
   function renderLeft(s) {
     var sc = s.sc, inc = sc.incident, html = '';
     var started = s.status !== 'IDLE';
 
     html += '<section class="panel card incident' + (started ? '' : ' muted') + '">';
-    html += '<div class="card-top"><span class="eyebrow">Incident ' + (started ? '<span class="num">' + esc(inc.ref) + '</span>' : '· waiting') + '</span>' +
+    html += '<div class="card-top"><span class="eyebrow">Incident ' + (started ? '<span class="num">' + esc(inc.ref) + '</span>' : '· none') + '</span>' +
       (started ? '<span class="prio" title="' + esc(inc.priorityNote) + '">' + esc(inc.priority) + '</span>' : '') + '</div>';
     if (!started) {
-      html += '<p class="idle-note">No active incident. Choose an oversight mode at the top, then press <b>Play</b> to run the scenario.</p>' +
-        '<p class="idle-note dim">Scenario: ' + esc(sc.title) + ', ' + esc(sc.city) + ', night.</p>';
+      html += '<p class="idle-note">No active incident. Waiting for a call.</p>';
     } else {
       html += '<h2 class="inc-type">' + esc(inc.type) + '</h2>' +
         '<div class="inc-addr">' + esc(inc.address) + '<span class="dim"> · ' + esc(inc.district) + '</span></div>' +
@@ -925,14 +950,13 @@
         '</dl>' +
         '<p class="notes"><span class="eyebrow">Caller notes</span>' + esc(inc.callerNotes) + '</p>' +
         '<div class="eta">' +
-        '<div class="eta-h"><span class="eyebrow">Nearest drone</span><span>' + esc(inc.drone.id) + ' · ' + esc(inc.drone.dock) + ' · <span class="num">' + inc.drone.distanceKm + ' km</span></span></div>' +
-        etaRow('Drone ' + inc.drone.id, 'drone-eta', 'eta-drone', 'sys') +
+        '<div class="eta-h"><span class="eyebrow">Arrival</span><span class="dim">' + esc(inc.drone.id) + ' from ' + esc(inc.drone.dock) + ', <span class="num">' + inc.drone.distanceKm + ' km</span></span></div>' +
+        etaRow('Drone', 'drone-eta', 'eta-drone', 'sys') +
         etaRow('Patrol ' + inc.patrol.id, 'patrol-eta', 'eta-patrol', 'neutral') +
         '</div>';
     }
     html += '</section>';
 
-    // stepper
     var cur = STEP_OF[s.status], ld = s.launchDecision;
     html += '<section class="panel card steps"><ol class="stepper">';
     STEPS.forEach(function (st) {
@@ -947,14 +971,6 @@
     });
     html += '</ol></section>';
 
-    // telemetry
-    html += '<section class="panel card tele"><div class="card-top"><span class="eyebrow">Drone ' + esc(sc.drone.id) + '</span><span class="tele-phase" data-live="tel-phase"></span></div>' +
-      '<dl class="tele-grid">' +
-      teleCell('Altitude', 'tel-alt') + teleCell('Speed', 'tel-speed') +
-      teleCell('Battery', 'tel-bat') + teleCell('Link', 'tel-link') +
-      teleCell('To site', 'tel-dist') + teleCell('ETA', 'tel-eta') +
-      '</dl></section>';
-
     $('left').innerHTML = html;
   }
 
@@ -963,7 +979,6 @@
       '<span class="eta-bar"><span class="eta-fill ' + tone + '" data-live-w="' + barKey + '"></span></span>' +
       '<span class="eta-v num" data-live="' + liveKey + '"></span></div>';
   }
-  function teleCell(k, key) { return '<div><dt>' + k + '</dt><dd class="num" data-live="' + key + '"></dd></div>'; }
 
   function stepNote(s, n) {
     var a = s.anchors, ld = s.launchDecision;
@@ -991,7 +1006,7 @@
     return '';
   }
 
-  /* ---- right column: what needs you, by state ---------------------------- */
+  /* ---- right column: decisions, one primary action at a time ------------- */
   function renderContext(s) {
     var html;
     switch (s.status) {
@@ -1011,145 +1026,188 @@
     el.scrollTop = keep;
   }
 
-  function banner(kind, title, sub, right) {
-    return '<div class="banner banner-' + kind + '"><div><div class="banner-t">' + title + '</div>' +
-      (sub ? '<div class="banner-s">' + sub + '</div>' : '') + '</div>' + (right || '') + '</div>';
+  /* The "Now" card. tone: ask (needs you) | sys (system acting) | calm (nothing needs you).
+     primary: at most one primary button. secondary: quieter alternatives. */
+  function nowCard(o) {
+    return '<section class="now now-' + o.tone + '" aria-live="polite">' +
+      '<div class="now-main">' +
+      (o.eyebrow ? '<div class="now-eyebrow">' + o.eyebrow + '</div>' : '') +
+      '<h2 class="now-title">' + o.title + '</h2>' +
+      (o.body ? '<p class="now-body">' + o.body + '</p>' : '') +
+      (o.extra || '') +
+      '</div>' +
+      (o.side ? '<div class="now-side">' + o.side + '</div>' : '') +
+      (o.primary || o.secondary ? '<div class="now-actions">' + (o.primary || '') + (o.secondary || '') + '</div>' : '') +
+      '</section>';
   }
 
   function ctxIdle(s) {
-    var html = banner('calm', 'Ready', 'One incident, one drone, one operator. Everything is simulated.');
-    html += '<section class="sec"><h3 class="sec-h">Oversight mode for this run</h3><ul class="modes">';
+    var html = nowCard({ tone: 'calm', title: 'No active incident', body: 'Waiting for a call. Start the scenario from the prototype bar at the top.' });
+    html += '<section class="sec"><h3 class="sec-h">Oversight mode for this incident</h3><ul class="modes">';
     Object.keys(MODES).forEach(function (k) {
       html += '<li class="mode-card' + (App.mode === k ? ' on' : '') + '"><button class="mode-pick" data-action="mode" data-arg="' + k + '" aria-pressed="' + (App.mode === k) + '">' +
-        '<span class="mode-name">' + esc(MODES[k].label) + '</span><span class="mode-sum">' + esc(MODES[k].summary) + '</span></button></li>';
+        '<span class="mode-name">' + esc(MODES[k].label) + (App.mode === k ? ' <span class="dim">· selected</span>' : '') + '</span><span class="mode-sum">' + esc(MODES[k].summary) + '</span></button></li>';
     });
-    html += '</ul><p class="fine">The mode is a setting chosen before the incident and locked while it runs. In every mode, the reason for launch and the rule that allowed it go into the audit trail.</p></section>';
-    html += '<div class="actions"><button class="btn btn-primary" data-action="play">Start scenario <kbd>Space</kbd></button>' +
-      '<button class="btn" data-action="jump">Jump to handover</button></div>';
+    html += '</ul><p class="fine">Chosen before the incident and locked while it runs. In every mode, the reason for launch and the rule that allowed it go into the audit trail.</p></section>';
     return html;
   }
 
   function ctxIncidentIn(s) {
-    return banner('sys', 'Incident received', 'Checking launch policy ' + esc(s.sc.launch.rule) + '. Nothing needs you yet.') +
-      launchReasons(s, 'Checking');
+    return nowCard({ tone: 'calm', eyebrow: 'Nothing needs you', title: 'Checking launch policy', body: 'Incident received. The system is checking rule ' + ruleChip(s.sc.launch.rule) + '.' }) +
+      launchReasons(s, 'What it is checking');
   }
 
-  function launchReasons(s, verb) {
-    var html = '<section class="sec"><h3 class="sec-h">' + esc(verb) + ' against policy ' + ruleChip(s.sc.launch.rule) + '</h3><ul class="reasons">';
+  function launchReasons(s, title) {
+    var html = '<section class="sec"><h3 class="sec-h">' + esc(title) + ' ' + ruleChip(s.sc.launch.rule) + '</h3><ul class="reasons">';
     s.sc.launch.reasons.forEach(function (r) { html += '<li>' + esc(r) + '</li>'; });
     return html + '</ul><p class="fine">' + esc(s.sc.rules[s.sc.launch.rule]) + '</p></section>';
   }
 
   function ctxLaunchGate(s) {
-    var sc = s.sc, html;
+    var sc = s.sc;
     if (s.mode === 'INTERACTIVE') {
-      html = banner('ask', 'Needs you · Launch decision',
-        'The system recommends launching ' + esc(sc.drone.id) + '. It will not launch without you.',
-        '<div class="banner-meta"><span class="eyebrow">Waiting</span><span class="num big" data-live="gate-wait"></span></div>');
-      html += '<section class="sec rec"><h3 class="sec-h">Recommendation</h3><p class="rec-line">Launch <b>' + esc(sc.drone.id) + '</b> from ' + esc(sc.incident.drone.dock) +
-        ' to ' + esc(sc.incident.address) + '.</p></section>';
-      html += launchReasons(s, 'Why: checked');
-      html += '<div class="actions"><button class="btn btn-ask" data-action="approve">Approve launch</button>' +
-        '<button class="btn" data-action="decline">Don\'t launch</button></div>' +
-        '<p class="fine">Patrol ' + esc(sc.patrol.id) + ' is dispatched either way. Your decision and its time go into the audit trail.</p>';
-    } else {
-      html = banner('sys', 'System acting · Automatic launch in <span class="num" data-live="abort-left"></span> s',
-        'Supervised mode. The system will launch ' + esc(sc.drone.id) + ' unless you abort.',
-        '<div class="banner-meta"><span class="eyebrow">Abort window</span><span class="num big">' + sc.launch.abortWindowS + ' s</span></div>');
-      html += '<div class="countdown" role="progressbar" aria-label="Abort window remaining"><span class="countdown-fill" data-live-w="abort-bar"></span></div>';
-      html += '<div class="actions"><button class="btn btn-ask" data-action="abort">Abort launch</button></div>';
-      html += launchReasons(s, 'Why: checked');
+      return nowCard({
+        tone: 'ask', eyebrow: 'Needs you · waiting <span class="num" data-live="gate-wait"></span>',
+        title: 'Launch ' + esc(sc.drone.id) + ' to ' + esc(sc.incident.address) + '?',
+        body: 'The system recommends it and will not launch without you. Patrol ' + esc(sc.patrol.id) + ' is dispatched either way.',
+        primary: '<button class="btn btn-primary-ask btn-lg" data-action="approve">Approve launch</button>',
+        secondary: '<button class="btn btn-quiet" data-action="decline">Don\'t launch</button>'
+      }) + launchReasons(s, 'Why the system recommends it');
     }
-    return html;
+    return nowCard({
+      tone: 'sys', eyebrow: 'System acting · nothing needs you',
+      title: 'Launching in <span class="num" data-live="abort-left"></span> s',
+      body: 'Supervised mode. The system launches ' + esc(sc.drone.id) + ' when the window closes. Abort only if something is wrong.',
+      extra: '<div class="countdown" role="progressbar" aria-label="Abort window remaining"><span class="countdown-fill" data-live-w="abort-bar"></span></div>',
+      secondary: '<button class="btn btn-quiet" data-action="abort">Abort launch</button>'
+    }) + launchReasons(s, 'Why it is launching');
   }
 
   function lastLaunchNotice(s) {
     var ld = s.launchDecision, sc = s.sc;
     if (!ld) return '';
-    var t = clockAt(s, ld.tick), msg;
-    if (ld.how === 'auto-lights-out') msg = '<b>Launched without asking you</b> at <span class="num">' + t + '</span>. Lights-out mode. Rule ' + ruleChip(sc.launch.rule) + '.';
-    else if (ld.how === 'auto-supervised') msg = '<b>Launched automatically</b> at <span class="num">' + t + '</span> after the abort window. Rule ' + ruleChip(sc.launch.rule) + '.';
-    else if (ld.how === 'approved-playback') msg = '<b>Launched</b> at <span class="num">' + t + '</span>. Approval was given by the playback jump, and logged as such.';
-    else msg = '<b>Launched on your approval</b> at <span class="num">' + t + '</span>. Rule ' + ruleChip(sc.launch.rule) + '.';
-    return '<div class="notice">' + msg + ' <button class="link" data-action="toggle-audit">See audit</button></div>';
+    var t = '<span class="num">' + clockAt(s, ld.tick) + '</span>', msg;
+    if (ld.how === 'auto-lights-out') msg = '<b>Launched without asking you</b> at ' + t + '. Lights-out mode, rule ' + ruleChip(sc.launch.rule) + '.';
+    else if (ld.how === 'auto-supervised') msg = '<b>Launched automatically</b> at ' + t + ' after the abort window. Rule ' + ruleChip(sc.launch.rule) + '.';
+    else if (ld.how === 'approved-playback') msg = '<b>Launched</b> at ' + t + '. Approval came from the playback jump and is logged as such.';
+    else msg = '<b>Launched on your approval</b> at ' + t + '. Rule ' + ruleChip(sc.launch.rule) + '.';
+    return '<p class="notice">' + msg + ' <button class="link" data-action="toggle-audit">See audit</button></p>';
   }
 
   function ctxTransit(s) {
-    var html = '<div class="calm">' +
-      '<div class="calm-t">Nothing needs you</div>' +
-      '<div class="calm-s">' + esc(s.sc.drone.id) + ' is flying itself to ' + esc(s.sc.incident.address) + '. Arrives in <b class="num" data-live="drone-eta-plain"></b>. ' +
-      'You will be asked to take over when it gets there.</div></div>';
-    html += lastLaunchNotice(s);
-    html += briefHTML(s, 'building');
-    return html;
+    return nowCard({
+      tone: 'calm', eyebrow: 'Nothing needs you', title: esc(s.sc.drone.id) + ' arrives in <span class="num" data-live="drone-eta-plain"></span>',
+      body: 'It is flying itself to ' + esc(s.sc.incident.address) + '. You will be asked to take over when it gets there.',
+      extra: lastLaunchNotice(s)
+    }) + briefHTML(s, 'building');
   }
 
   function ctxHandover(s) {
-    var html = '<div class="banner banner-ask banner-handover">' +
-      '<div><div class="banner-t">Needs you · Take over ' + esc(s.sc.drone.id) + '</div>' +
-      '<div class="banner-s">It keeps orbiting and acts on nothing below until you do.</div></div>' +
-      '<div class="handover-cta"><div class="tth"><span class="eyebrow">Time-to-handover</span><span class="num big" data-live="tth"></span></div>' +
-      '<button class="btn btn-ask btn-lg" data-action="take-control">Take control <kbd>T</kbd></button></div></div>';
-    html += briefHTML(s, 'handover');
-    return html;
+    return nowCard({
+      tone: 'ask', eyebrow: 'Needs you', title: 'Take over ' + esc(s.sc.drone.id),
+      body: 'It keeps orbiting and acts on nothing below until you do.',
+      side: '<div class="tth"><span class="eyebrow">Time-to-handover</span><span class="num big" data-live="tth"></span></div>' +
+        '<button class="btn btn-primary-ask btn-lg" data-action="take-control">Take control <kbd>T</kbd></button>'
+    }) + briefHTML(s, 'handover');
   }
 
   function ctxOnScene(s) {
-    var sc = s.sc, p = patrolInfo(s);
-    var html = '<div class="banner banner-op"><div><div class="banner-t">You have control</div>' +
-      '<div class="banner-s">Nothing the system suggests will run until you act. Took over in <b class="num">' + fmtMS(timeToHandover(s)) + '</b>.</div></div>' +
-      '<div class="banner-meta"><span class="eyebrow">Patrol ' + esc(sc.patrol.id) + '</span><span class="num big" data-live="patrol-eta"></span></div></div>';
-    html += controlsHTML(s);
-    html += decisionsHTML(s, true);
-    if (s.sc.suggestions.some(function (g) { return s.suggestionsUsed[g.id] == null; })) html += suggestionsHTML(s, true);
-    html += '<div class="end-row' + (p.onScene ? ' ready' : '') + '"><div>' +
-      (p.onScene ? '<b>Patrol ' + esc(sc.patrol.id) + ' is on scene.</b> End the incident when the aerial view is no longer needed. The drone flies itself back.'
-        : 'You can end the incident once patrol ' + esc(sc.patrol.id) + ' is on scene (ETA <span class="num" data-live="patrol-eta"></span>).') +
-      '</div><button class="btn ' + (p.onScene ? 'btn-ask' : '') + '" data-action="end"' + (p.onScene ? '' : ' disabled') + '>End incident</button></div>';
-    html += '<div class="brief-grid">' + detectedHTML(s, 'onscene') + unknownsHTML(s, 'onscene') + '</div>';
+    var sc = s.sc, next = nextAction(s).kind, det = s.detections['D-02'], html = '';
+    html += '<div class="status-line"><span><b>You have control</b> · took over in <span class="num">' + fmtMS(timeToHandover(s)) + '</span></span>' +
+      '<span>Patrol ' + esc(sc.patrol.id) + ' <b class="num" data-live="patrol-eta"></b></span></div>';
+
+    if (next === 'garden') {
+      var dg = sc.decisions[0];
+      html += nowCard({
+        tone: 'ask', eyebrow: 'Decide now · 1 of 2', title: esc(dg.title) + ' ' + confHTML(det.confidence),
+        body: esc(dg.text) + ' The system will not choose for you, and you can change your choice later.',
+        extra: '<div class="choices">' + dg.choices.map(function (c) {
+          return '<button class="btn choice" data-action="garden" data-arg="' + c.choice + '"><span class="choice-l">' + esc(c.label) + '</span><span class="choice-n">' + esc(c.note) + '</span></button>';
+        }).join('') + '</div>'
+      });
+    } else if (next === 'share') {
+      var ds = sc.decisions[1];
+      html += nowCard({
+        tone: 'ask', eyebrow: 'Decide now · 2 of 2', title: esc(ds.title), body: esc(ds.text) +
+          (s.garden.choice === 'AWAY' ? ' The garden is masked on the shared feed.' : ''),
+        primary: '<button class="btn btn-primary-ask" data-action="share" data-arg="on">Share feed</button>',
+        secondary: '<button class="btn btn-quiet" data-action="share-decline">Don\'t share</button>'
+      });
+    } else if (next === 'end') {
+      html += nowCard({
+        tone: 'ask', eyebrow: 'Needs you', title: 'Patrol ' + esc(sc.patrol.id) + ' is on scene',
+        body: 'End the incident when the aerial view is no longer needed. ' + esc(sc.drone.id) + ' flies itself back to the dock.',
+        primary: '<button class="btn btn-primary-ask btn-lg" data-action="end">End incident</button>'
+      });
+    } else {
+      html += nowCard({
+        tone: 'calm', eyebrow: 'Nothing needs you', title: 'Patrol ' + esc(sc.patrol.id) + ' arrives in <span class="num" data-live="patrol-eta"></span>',
+        body: 'You will be asked to end the incident when it is on scene. Until then, use the live view controls for a closer look if you want.'
+      });
+    }
+
+    html += decisionsMade(s);
+    if (next !== 'end') html += suggestionsHTML(s, true);
+    html += '<div class="brief-grid">' + detectedHTML(s) + unknownsHTML(s) + '</div>';
     return html;
   }
 
+  /* Resolved decisions, with quiet links to revise them. */
+  function decisionsMade(s) {
+    var sc = s.sc, rows = [];
+    if (s.garden.choice !== 'PENDING') {
+      var dg = sc.decisions[0], cur = s.garden.choice, last = s.garden.history[s.garden.history.length - 1];
+      var lbl = dg.choices.filter(function (c) { return c.choice === cur; })[0];
+      rows.push('<li><span class="made-t">' + esc(dg.title) + '</span><span class="made-v">You chose <b>' + esc(lbl.label.toLowerCase()) + '</b> · <span class="num">' + clockAt(s, last.tick) + '</span></span>' +
+        '<span class="made-change">Change to ' + dg.choices.filter(function (c) { return c.choice !== cur; }).map(function (c) {
+          return '<button class="link" data-action="garden" data-arg="' + c.choice + '">' + esc(c.label.toLowerCase()) + '</button>';
+        }).join(' or ') + '</span></li>');
+    }
+    if (s.shareDecided) {
+      rows.push('<li><span class="made-t">Live feed to ' + esc(sc.patrol.id) + '</span><span class="made-v">' + (s.feedShared ? '<b>Shared</b>' : '<b>Not shared</b>') + '</span>' +
+        '<span class="made-change"><button class="link" data-action="share" data-arg="' + (s.feedShared ? 'off' : 'on') + '">' + (s.feedShared ? 'Stop sharing' : 'Share now') + '</button></span></li>');
+    }
+    if (!rows.length) return '';
+    return '<section class="sec"><h3 class="sec-h">Your decisions</h3><ul class="made">' + rows.join('') + '</ul></section>';
+  }
+
   function ctxRtb(s) {
-    return '<div class="calm"><div class="calm-t">Nothing needs you</div><div class="calm-s">' + esc(s.sc.drone.id) +
-      ' is flying itself back to ' + esc(s.sc.incident.drone.dock) + '. Docks in <b class="num" data-live="drone-eta-plain"></b>. The close-out summary opens when it docks.</div></div>' +
-      '<div class="brief-grid">' + detectedHTML(s, 'onscene') + unknownsHTML(s, 'onscene') + '</div>';
+    return nowCard({ tone: 'calm', eyebrow: 'Nothing needs you', title: esc(s.sc.drone.id) + ' docks in <span class="num" data-live="drone-eta-plain"></span>',
+      body: 'It is flying itself back to ' + esc(s.sc.incident.drone.dock) + '. The close-out summary opens when it docks.' }) +
+      '<div class="brief-grid">' + detectedHTML(s) + unknownsHTML(s) + '</div>';
   }
 
   function ctxPatrolOnly(s) {
     var sc = s.sc, p = patrolInfo(s), ld = s.launchDecision;
-    var html = '<div class="notice"><b>' + esc(sc.drone.id) + ' was not launched.</b> ' +
+    var note = '<p class="notice"><b>' + esc(sc.drone.id) + ' was not launched.</b> ' +
       (ld.how === 'declined' ? 'You declined the recommendation' : 'You aborted the automatic launch') +
-      ' at <span class="num">' + clockAt(s, ld.tick) + '</span>. <button class="link" data-action="toggle-audit">See audit</button></div>';
+      ' at <span class="num">' + clockAt(s, ld.tick) + '</span>. <button class="link" data-action="toggle-audit">See audit</button></p>';
     if (!p.onScene) {
-      html = '<div class="calm"><div class="calm-t">Nothing needs you</div><div class="calm-s">Patrol ' + esc(sc.patrol.id) +
-        ' is on its way without an aerial view. ETA <b class="num" data-live="patrol-eta"></b>.</div></div>' + html;
-    } else {
-      html = banner('ask', 'Needs you · Patrol on scene', 'Patrol ' + esc(sc.patrol.id) + ' is at ' + esc(sc.incident.address) + '. End the incident on the console.') + html +
-        '<div class="actions"><button class="btn btn-ask" data-action="end">End incident</button></div>';
+      return nowCard({ tone: 'calm', eyebrow: 'Nothing needs you', title: 'Patrol ' + esc(sc.patrol.id) + ' arrives in <span class="num" data-live="patrol-eta"></span>',
+        body: 'It is on its way without an aerial view.', extra: note });
     }
-    return html;
+    return nowCard({ tone: 'ask', eyebrow: 'Needs you', title: 'Patrol ' + esc(sc.patrol.id) + ' is on scene',
+      body: 'End the incident on the console.', extra: note,
+      primary: '<button class="btn btn-primary-ask btn-lg" data-action="end">End incident</button>' });
   }
 
   function ctxClosed(s) {
-    return banner('calm', 'Incident closed', 'Drone docked. See the close-out summary for who did what, and when.') +
-      '<div class="actions"><button class="btn btn-primary" data-action="closeout-open">Show close-out summary</button>' +
-      '<button class="btn" data-action="restart">Restart scenario</button></div>';
+    return nowCard({ tone: 'calm', title: 'Incident closed', body: 'Drone docked. The close-out summary shows who did what, and when.',
+      secondary: '<button class="btn" data-action="closeout-open">Show close-out summary</button>' });
   }
 
   /* ---- handover brief ---------------------------------------------------- */
-  /* mode: 'building' (transit, filling in) | 'handover' | 'onscene' */
+  /* mode: 'building' (transit, filling in) | 'handover'. No buttons in the brief:
+     the only action at handover is Take control. */
   function briefHTML(s, mode) {
     var sc = s.sc, html = '<div class="brief' + (mode === 'building' ? ' building' : '') + '">';
-    // 1. looking at
-    html += '<section class="sec"><h3 class="sec-h"><span class="sec-n">1</span>What the drone is looking at<span class="sec-aside">' +
-      (mode === 'building' ? 'Handover brief · filling in as the drone flies' : 'Handover brief · prepared by the system ' + clockAt(s, s.anchors.A)) + '</span></h3>';
+    html += '<section class="sec"><h3 class="sec-h"><span class="sec-n">1</span>What the drone is looking at<span class="sec-aside">Handover brief · ' +
+      (mode === 'building' ? 'filling in as the drone flies' : 'prepared by the system at <span class="num">' + clockAt(s, s.anchors.A) + '</span>') + '</span></h3>';
     if (s.anchors.A != null) html += '<p class="looking">' + esc(sc.brief.lookingAt) + '</p>';
     else if (s.camAuto) html += '<p class="looking pending">Camera on the site, <span class="num" data-live="tel-dist"></span> out. One-line summary on arrival.</p>';
     else html += '<p class="looking pending">Camera looking ahead along the route. Site not in view yet.</p>';
     html += '</section>';
 
-    // 2. since launch
     var did = sinceLaunch(s);
     html += '<section class="sec"><h3 class="sec-h"><span class="sec-n">2</span>What the system did since launch</h3><ol class="did">';
     did.forEach(function (e) {
@@ -1158,19 +1216,43 @@
     if (!did.length) html += '<li class="pending">Nothing yet.</li>';
     html += '</ol></section>';
 
-    // 3 + 4. detected | unknown, side by side, same weight
-    html += '<div class="brief-grid">' + detectedHTML(s, mode) + unknownsHTML(s, mode) + '</div>';
+    var cap = ui.briefAll ? 0 : 3;
+    html += '<div class="brief-grid">' + detectedHTML(s, 3, cap) + unknownsHTML(s, 4, cap) + '</div>';
+    if (s.detOrder.length > 3 || s.unkOrder.length > 3) {
+      html += '<button class="link more" data-action="brief-all">' + (ui.briefAll ? 'Show fewer' : 'Show all ' + s.detOrder.length + ' detections and ' + s.unkOrder.length + ' unknowns') + '</button>';
+    }
 
-    // 5. decisions, 6. suggestions
-    html += decisionsHTML(s, false, mode);
+    // 5. decisions: listed, not actionable until take control
+    var decs = visibleDecisions(s);
+    html += '<section class="sec"><h3 class="sec-h"><span class="sec-n">5</span>Decisions waiting for you <span class="dim">· most urgent first</span></h3>';
+    if (mode === 'building') {
+      html += s.detections['D-02']
+        ? '<p class="queued">Queued for when you take over: <b>figure in a private garden</b> ' + confHTML(s.detections['D-02'].confidence) + '. The drone is not acting on it.</p>'
+        : '<p class="pending">None yet.</p>';
+    } else {
+      html += '<ol class="dec-list">' + decs.map(function (d, i) {
+        var conf = d.kind === 'garden' && s.detections['D-02'] ? ' ' + confHTML(s.detections['D-02'].confidence) : '';
+        var opts = d.choices ? '<div class="dec-x">Options: ' + d.choices.map(function (c) { return c.label.toLowerCase(); }).join(', ') + '.</div>' : '';
+        return '<li class="' + (i === 0 ? 'first' : '') + '"><span class="dec-n">' + esc(d.urgency) + '</span><div><div class="dec-t">' + esc(d.title) + conf + '</div>' + opts + '</div></li>';
+      }).join('') + '</ol>';
+    }
+    html += '</section>';
+
     html += suggestionsHTML(s, false, mode);
     return html + '</div>';
   }
 
-  function detectedHTML(s, mode) {
-    var html = '<section class="sec half"><h3 class="sec-h"><span class="sec-n">3</span>What it detected <span class="count num">' + s.detOrder.length + '</span>' +
-      '<span class="fr-tag" title="Facial recognition is not part of this programme. Identity is never inferred from the feed."><span class="strike">FR</span> disabled</span></h3><ul class="items">';
-    s.detOrder.forEach(function (id) {
+  /* Decision-relevant items first, then scenario order. cap = 0 shows all. */
+  function ranked(ids, first) {
+    return ids.filter(function (id) { return first(id); }).concat(ids.filter(function (id) { return !first(id); }));
+  }
+
+  function detectedHTML(s, n, cap) {
+    var html = '<section class="sec half"><h3 class="sec-h">' + (n ? '<span class="sec-n">' + n + '</span>' : '') + 'What it detected <span class="count num">' + s.detOrder.length + '</span>' +
+      '<span class="fr-tag" title="Facial recognition is not part of this programme. Identity is never inferred from the feed."><span class="strike">FR</span> off</span></h3><ul class="items">';
+    var ids = ranked(s.detOrder, function (id) { return s.detections[id].needsHuman; });
+    if (cap) ids = ids.slice(0, cap);
+    ids.forEach(function (id) {
       var d = s.detections[id];
       var masked = d.privateArea && s.garden.choice === 'AWAY';
       var status = d.needsHuman ? '<div class="item-s ask">Needs your decision</div>' : (d.status !== 'Detected' ? '<div class="item-s">' + esc(d.status) + '</div>' : '');
@@ -1183,9 +1265,11 @@
     return html + '</ul></section>';
   }
 
-  function unknownsHTML(s, mode) {
-    var html = '<section class="sec half"><h3 class="sec-h"><span class="sec-n">4</span>Doesn\'t know or unsure <span class="count num">' + s.unkOrder.length + '</span></h3><ul class="items">';
-    s.unkOrder.forEach(function (id) {
+  function unknownsHTML(s, n, cap) {
+    var html = '<section class="sec half"><h3 class="sec-h">' + (n ? '<span class="sec-n">' + n + '</span>' : '') + 'What it doesn\'t know <span class="count num">' + s.unkOrder.length + '</span></h3><ul class="items">';
+    var ids = ranked(s.unkOrder, function (id) { return id === 'U-03' || id === 'U-04'; });
+    if (cap) ids = ids.slice(0, cap);
+    ids.forEach(function (id) {
       var u = s.unknowns[id], det = s.detections['D-02'];
       var conf = id === 'U-03' && det ? confHTML(det.confidence, det.verifiedBy) : '';
       html += '<li class="item unk' + (u.resolved ? ' resolved' : '') + '" title="' + esc(id) + '"><div class="thumb unk-mark" aria-hidden="true">?<span class="thumb-id num">' + esc(id) + '</span></div>' +
@@ -1196,88 +1280,61 @@
     return html + '</ul></section>';
   }
 
-  function decisionsHTML(s, live, mode) {
-    var decs = visibleDecisions(s);
-    var html = '<section class="sec decisions"><h3 class="sec-h"><span class="sec-n">5</span>Decisions waiting for you <span class="dim">· most urgent first' +
-      (mode === 'handover' ? ' · take control to decide' : '') + '</span></h3>';
-    if (mode === 'building') {
-      if (s.detections['D-02']) {
-        html += '<div class="queued">Queued for when you take over: <b>figure in a private garden</b> ' + confHTML(s.detections['D-02'].confidence) +
-          '. The drone is not acting on it.</div>';
-      } else html += '<p class="pending">None yet.</p>';
-      return html + '</section>';
-    }
-    if (!decs.length) return html + '<p class="pending">None.</p></section>';
-    html += '<ol class="decs">';
-    decs.forEach(function (d) {
-      if (d.kind === 'garden') html += gardenDecision(s, d, live);
-      else if (d.kind === 'share') html += shareDecision(s, d, live);
-    });
-    return html + '</ol></section>';
-  }
-
-  function gardenDecision(s, d, live) {
-    var cur = s.garden.choice, open = cur === 'PENDING', last = s.garden.history[s.garden.history.length - 1];
-    var det = s.detections['D-02'];
-    var html = '<li class="dec' + (open ? ' open' : ' done') + '"><div class="dec-top"><span class="urg">' + esc(d.urgency) + '</span>' +
-      '<span class="dec-t">' + esc(d.title) + '</span>' + confHTML(det.confidence, det.verifiedBy) + '</div>';
-    if (open) html += '<p class="dec-x">' + esc(d.text) + '</p>';
-    else {
-      var lbl = d.choices.filter(function (c) { return c.choice === cur; })[0];
-      html += '<p class="dec-x">You chose <b>' + esc(lbl.label.toLowerCase()) + '</b> at <span class="num">' + clockAt(s, last.tick) + '</span>. ' + esc(lbl.note) + ' You can change this.</p>';
-    }
-    html += '<div class="choices">';
-    d.choices.forEach(function (c) {
-      var chosen = c.choice === cur;
-      html += '<button class="btn choice' + (chosen ? ' chosen' : open ? ' btn-ask-o' : '') + '" data-action="garden" data-arg="' + c.choice + '"' +
-        (!live || chosen ? ' disabled' : '') + ' title="' + esc(c.note) + '">' + (chosen ? '✓ ' : '') + esc(c.label) + '</button>';
-    });
-    return html + '</div></li>';
-  }
-
-  function shareDecision(s, d, live) {
-    var on = s.feedShared;
-    return '<li class="dec dec-inline' + (on ? ' done' : ' open-lite') + '"><span class="urg">' + esc(d.urgency) + '</span>' +
-      '<div class="dec-b"><span class="dec-t">' + (on ? 'Feed shared with ' + esc(s.sc.patrol.id) : esc(d.title)) + '</span> ' +
-      '<span class="dec-x">' + (on ? '' : esc(d.text)) + '</span></div>' +
-      '<button class="btn btn-sm" data-action="share" data-arg="' + (on ? 'off' : 'on') + '"' + (live ? '' : ' disabled') + '>' + (on ? 'Stop sharing' : 'Share feed') + '</button></li>';
-  }
-
+  /* Suggestions are always secondary: quiet buttons, and none before take control. */
   function suggestionsHTML(s, live, mode) {
-    var html = '<section class="sec sugg"><h3 class="sec-h"><span class="sec-n">6</span>Suggested first actions <span class="tag-sugg">Suggestions · nothing runs until you act</span></h3>';
+    var html = '<section class="sec sugg"><h3 class="sec-h">' + (live ? '' : '<span class="sec-n">6</span>') + 'Suggested first actions <span class="dim">· ' +
+      (live ? 'optional · nothing runs until you act' : 'suggestions only · usable after you take control') + '</span></h3>';
     if (!suggestionsVisible(s)) return html + '<p class="pending">Prepared on arrival.</p></section>';
-    html += '<ul class="suggs">';
-    s.sc.suggestions.forEach(function (g) {
+    var list = s.sc.suggestions;
+    if (live && list.every(function (g) { return s.suggestionsUsed[g.id] != null; })) return '';
+    html += '<ul class="suggs' + (live ? ' live' : '') + '">';
+    list.forEach(function (g) {
       var used = s.suggestionsUsed[g.id];
       html += '<li class="sg' + (used != null ? ' used' : '') + '"><span class="item-id num">' + esc(g.id) + '</span><span class="sg-t">' + esc(g.text) + '</span>' +
-        (used != null ? '<span class="sg-done num">✓ Done ' + clockAt(s, used) + '</span>'
-          : '<button class="btn btn-sm" data-action="suggest" data-arg="' + g.id + '"' + (live ? '' : ' disabled') + '>Do it</button>') + '</li>';
+        (!live ? '' : used != null ? '<span class="sg-done num">Done ' + clockAt(s, used) + '</span>'
+          : '<button class="btn btn-quiet btn-sm" data-action="suggest" data-arg="' + g.id + '">Do it</button>') + '</li>';
     });
     return html + '</ul></section>';
   }
 
-  /* ---- on-scene controls ------------------------------------------------- */
-  function controlsHTML(s) {
+  /* ---- live view toolbar: drone and camera controls, attached to the view ---- */
+  function renderFeedTools(s) {
+    var el = $('feed-tools');
+    $('feed-title').innerHTML = s.airborne ? 'Live view' : 'Live view <span class="dim">· off</span>';
+    if (s.status !== 'ON_SCENE') {
+      var msg = {
+        IDLE: 'No drone in the air.',
+        INCIDENT_IN: 'DR-03 is docked.',
+        LAUNCH_GATE: 'DR-03 is docked. No live view until launch.',
+        TRANSIT: 'Controls unlock when you take control.',
+        HANDOVER: 'Holding DR-03 in orbit. Controls unlock when you take control.',
+        RTB: 'Flying DR-03 back to the dock.',
+        PATROL_ONLY: 'DR-03 was not launched.',
+        CLOSED: 'DR-03 is docked. Feed ended.'
+      }[s.status];
+      el.className = 'feed-tools off';
+      el.innerHTML = '<div class="tools-row">' + (s.airborne ? '<span class="steer steer-sys">System steering</span>' : '') +
+        '<span class="tools-msg">' + esc(msg) + '</span></div>';
+      return;
+    }
     var z = s.camera.zoom, armed = ui.armed;
-    var html = '<section class="sec controls"><h3 class="sec-h">Drone and camera</h3><div class="ctl-grid">';
-    html += '<div class="ctl-group"><span class="eyebrow">Flight</span><div class="seg">' +
+    var row1 = '<span class="steer steer-op">You are steering</span><span class="tools-sep" aria-hidden="true"></span>' +
+      '<button class="btn btn-sm tool-toggle' + (s.recording ? ' on' : '') + '" data-action="rec" data-arg="' + (s.recording ? 'off' : 'on') + '" aria-pressed="' + s.recording + '">' +
+      '<span class="rec-dot" aria-hidden="true"></span>' + (s.recording ? 'Recording' : 'Not recording') + '</button>' +
+      '<button class="btn btn-sm tool-toggle' + (s.feedShared ? ' on' : '') + '" data-action="share" data-arg="' + (s.feedShared ? 'off' : 'on') + '" aria-pressed="' + s.feedShared + '">' +
+      (s.feedShared ? 'Shared with ' : 'Not shared with ') + esc(s.sc.patrol.id) + '</button>';
+    var row2 = '<div class="seg" role="group" aria-label="Flight">' +
       '<button class="seg-btn' + (s.orbiting ? ' on' : '') + '" data-action="orbit" aria-pressed="' + s.orbiting + '">Orbit</button>' +
-      '<button class="seg-btn' + (!s.orbiting ? ' on' : '') + '" data-action="hold" aria-pressed="' + !s.orbiting + '">Hold</button></div></div>';
-    html += '<div class="ctl-group"><span class="eyebrow">Zoom</span><div class="seg">' + [1, 2, 4].map(function (n) {
-      return '<button class="seg-btn num' + (z === n ? ' on' : '') + '" data-action="zoom" data-arg="' + n + '" aria-pressed="' + (z === n) + '">' + n + '×</button>';
-    }).join('') + '</div></div>';
-    html += '<div class="ctl-group"><span class="eyebrow">On map or feed</span><div class="seg">' +
-      '<button class="seg-btn' + (armed === 'point' ? ' on' : '') + '" data-action="arm" data-arg="point" aria-pressed="' + (armed === 'point') + '">Point camera…</button>' +
-      '<button class="seg-btn' + (armed === 'poi' ? ' on' : '') + '" data-action="arm" data-arg="poi" aria-pressed="' + (armed === 'poi') + '">Mark point…</button></div></div>';
-    html += '<div class="ctl-group"><span class="eyebrow">Recording</span><button class="btn btn-sm" data-action="rec" data-arg="' + (s.recording ? 'off' : 'on') + '">' +
-      (s.recording ? 'Stop recording' : 'Start recording') + '</button></div>';
-    html += '<div class="ctl-group"><span class="eyebrow">Feed to ' + esc(s.sc.patrol.id) + '</span><button class="btn btn-sm" data-action="share" data-arg="' + (s.feedShared ? 'off' : 'on') + '">' +
-      (s.feedShared ? 'Stop sharing' : 'Share feed') + '</button></div>';
-    html += '</div>';
-    if (armed) html += '<p class="arm-line">' + (armed === 'point' ? 'Click the map or the feed to point the camera there.' : 'Click the map or the feed to mark a point of interest.') +
-      ' <button class="link" data-action="arm" data-arg="">Cancel (Esc)</button></p>';
-    if (s.pois.length) html += '<p class="fine">Marked: ' + s.pois.map(function (p) { return '<b>' + esc(p.id) + '</b> ' + esc(p.label); }).join(' · ') + '</p>';
-    return html + '</section>';
+      '<button class="seg-btn' + (!s.orbiting ? ' on' : '') + '" data-action="hold" aria-pressed="' + !s.orbiting + '">Hold</button></div>' +
+      '<div class="seg" role="group" aria-label="Zoom">' + [1, 2, 4].map(function (n) {
+        return '<button class="seg-btn num' + (z === n ? ' on' : '') + '" data-action="zoom" data-arg="' + n + '" aria-pressed="' + (z === n) + '">' + n + '×</button>';
+      }).join('') + '</div>' +
+      '<div class="seg" role="group" aria-label="Pick a spot on the view or map">' +
+      '<button class="seg-btn' + (armed === 'point' ? ' on' : '') + '" data-action="arm" data-arg="point" aria-pressed="' + (armed === 'point') + '" title="Point the camera: then click the view or the map">Point</button>' +
+      '<button class="seg-btn' + (armed === 'poi' ? ' on' : '') + '" data-action="arm" data-arg="poi" aria-pressed="' + (armed === 'poi') + '" title="Mark a point of interest: then click the view or the map">Mark</button></div>' +
+      '<span class="tools-sep" aria-hidden="true"></span><span class="tool-hint">' + (s.orbiting ? 'Orbiting 80 m' : 'Holding position') + '</span>';
+    el.className = 'feed-tools';
+    el.innerHTML = '<div class="tools-row">' + row1 + '</div><div class="tools-row">' + row2 + '</div>';
   }
 
   function renderHints() {
@@ -1294,7 +1351,7 @@
   /* ---- live values (every frame) ---------------------------------------- */
   var LIVE = {
     'clock': function (s) { return s.status === 'IDLE' ? clockAt(s, 0) : clockAt(s); },
-    'tplus': function (s) { return 'T+' + fmtMS(tSec(s)); },
+    'tplus': function (s) { return 'Scenario T+' + fmtMS(tSec(s)); },
     'condense-x': function (s) { return s.sc.condenseFactor + '×'; },
     'since-call': function (s) { return fmtMS(tSec(s) - s.sc.incident.callReceivedS); },
     'drone-eta': function (s) {
@@ -1358,44 +1415,43 @@
     if (cz.hidden === cond) cz.hidden = !cond;
   }
 
-  /* ---- playback bar ------------------------------------------------------ */
+  /* ---- prototype harness (simulation playback, not part of the console) --- */
   function timelineSpan(s) {
     return s.sc.patrol.arriveAt + 60 + s.sc.drone.rtbS + 20;
   }
 
-  function renderPlayback(s) {
-    var sc = s.sc, span = timelineSpan(s), a = s.anchors;
-    var playing = App.playing;
-    var html = '<div class="pb-ctrls">' +
-      '<button class="btn pb-play" data-action="' + (playing ? 'pause' : 'play') + '"' + (s.status === 'CLOSED' ? ' disabled' : '') + ' aria-label="' + (playing ? 'Pause' : 'Play') + '">' +
-      (playing ? '<span class="ico-pause" aria-hidden="true"></span>Pause' : '<span class="ico-play" aria-hidden="true"></span>Play') + ' <kbd>Space</kbd></button>' +
-      '<div class="seg">' + [1, 2, 4].map(function (n) {
-        return '<button class="seg-btn num' + (App.speed === n ? ' on' : '') + '" data-action="speed" data-arg="' + n + '" aria-pressed="' + (App.speed === n) + '">' + n + '×</button>';
+  function renderHarness(s) {
+    var sc = s.sc, span = timelineSpan(s), a = s.anchors, playing = App.playing;
+    var html = '<div class="h-id"><span class="h-tag">Prototype</span><span class="h-name">Simulation playback · not part of the console</span></div>';
+    html += '<div class="h-ctrls">' +
+      '<button class="hbtn hbtn-main" data-action="' + (playing ? 'pause' : 'play') + '"' + (s.status === 'CLOSED' ? ' disabled' : '') + '>' +
+      (playing ? '<span class="ico-pause" aria-hidden="true"></span>Pause' : '<span class="ico-play" aria-hidden="true"></span>' + (s.status === 'IDLE' ? 'Start scenario' : 'Play')) + ' <kbd>Space</kbd></button>' +
+      '<div class="hseg" role="group" aria-label="Speed">' + [1, 2, 4].map(function (n) {
+        return '<button class="hbtn num' + (App.speed === n ? ' on' : '') + '" data-action="speed" data-arg="' + n + '" aria-pressed="' + (App.speed === n) + '">' + n + '×</button>';
       }).join('') + '</div>' +
-      '<button class="btn" data-action="restart">Restart</button>' +
-      '<button class="btn" data-action="jump"' + (Playback.canJump() ? '' : ' disabled') + '>Jump to handover</button></div>';
+      '<button class="hbtn" data-action="restart">Restart</button>' +
+      '<button class="hbtn" data-action="jump"' + (Playback.canJump() ? '' : ' disabled') + '>Jump to handover</button></div>';
 
-    // timeline with markers (projected markers are dimmed)
     var marks = [
       { t: a.L != null ? a.L / TPS : null, label: 'Launch' },
       { t: a.A != null ? a.A / TPS : null, label: 'Arrival' },
-      { t: a.H != null ? a.H / TPS : null, label: 'Take control' },
-      { t: sc.patrol.arriveAt, label: 'Patrol', fixed: true },
+      { t: a.H != null ? a.H / TPS : null, label: 'Control' },
+      { t: sc.patrol.arriveAt, label: 'Patrol' },
       { t: a.E != null ? a.E / TPS : null, label: 'End' },
       { t: a.D != null && a.L != null ? a.D / TPS : null, label: 'Docked' }
     ];
-    html += '<div class="pb-track" aria-hidden="true"><div class="pb-rail"><span class="pb-fill" data-live-w="progress"></span>';
+    html += '<div class="h-time num"><span data-live="tplus"></span><span class="condensed" id="condensed" hidden>quiet stretch ×<span data-live="condense-x"></span></span></div>';
+    html += '<div class="h-track" aria-hidden="true"><div class="h-rail"><span class="h-fill" data-live-w="progress"></span>';
     var lastPct = -100, up = false;
     marks.forEach(function (m) {
       if (m.t == null) return;
       var past = s.tick / TPS >= m.t, pct = clamp(m.t / span * 100, 0, 100);
       up = pct - lastPct < 7 ? !up : false;
       lastPct = pct;
-      html += '<span class="pb-mark' + (past ? ' past' : '') + (up ? ' up' : '') + '" style="left:' + pct.toFixed(2) + '%"><span>' + m.label + '</span></span>';
+      html += '<span class="h-mark' + (past ? ' past' : '') + (up ? ' up' : '') + '" style="left:' + pct.toFixed(2) + '%"><span>' + m.label + '</span></span>';
     });
     html += '</div></div>';
-    html += '<div class="pb-keys"><span><kbd>T</kbd> take control</span><span><kbd>Space</kbd> pause</span><span><kbd>A</kbd> audit</span></div>';
-    $('playback').innerHTML = html;
+    $('harness').innerHTML = html;
   }
 
   /* ---- audit drawer ------------------------------------------------------ */
@@ -1860,7 +1916,7 @@
     ctx.fillStyle = 'rgba(11,14,18,0.78)'; ctx.fillRect(0, 0, W, 22); ctx.fillRect(0, H - 22, W, 22);
     ctx.fillStyle = '#b2bbc7';
     var mode = s.airborne ? phaseLabel(s).toUpperCase() : 'DOCKED';
-    ctx.fillText(sc.drone.id + ' · THERMAL WHITE-HOT · ' + mode + ' · ALT ' + Math.round(s.drone.alt) + ' M · ZOOM ' + s.camera.zoom + '×', 8, 15);
+    ctx.fillText((s.airborne ? 'LIVE · ' : '') + sc.drone.id + ' THERMAL · ' + mode + ' · ZOOM ' + s.camera.zoom + '×', 8, 15);
     var rec = s.recording ? '● REC ' + clockAt(s) : '○ NOT RECORDING';
     ctx.fillStyle = s.recording ? '#e7ebf0' : '#8c96a3';
     ctx.textAlign = 'right'; ctx.fillText(rec, W - 8, 15);
@@ -1874,14 +1930,6 @@
       ctx.beginPath(); ctx.moveTo(bx, by - 3); ctx.lineTo(bx, by); ctx.lineTo(bx + m20, by); ctx.lineTo(bx + m20, by - 3); ctx.stroke();
       ctx.textAlign = 'center'; ctx.fillStyle = '#e7ebf0'; ctx.fillText('20 m', bx + m20 / 2, by - 5); ctx.textAlign = 'left';
     }
-  }
-
-  function renderFeedFlags(s) {
-    var f = [];
-    if (s.airborne) f.push('<span class="flag">' + (s.controller === 'OPERATOR' ? 'You are steering' : 'System steering') + '</span>');
-    if (s.garden.choice === 'AWAY') f.push('<span class="flag">Garden masked</span>');
-    if (s.feedShared) f.push('<span class="flag">Shared with ' + esc(s.sc.patrol.id) + '</span>');
-    $('feed-flags').innerHTML = f.join('');
   }
 
   /* Evidence thumbnail: thermal crop around a detection, captured once per version. */
@@ -1926,6 +1974,7 @@
       case 'arm': ui.armed = (arg && ui.armed !== arg) ? arg : null; ui.dirty = true; return;
       case 'rec': act({ type: 'OP_RECORD', on: arg === 'on' }); return;
       case 'share': act({ type: 'OP_SHARE_FEED', on: arg === 'on' }); return;
+      case 'share-decline': act({ type: 'OP_SHARE_DECLINE' }); return;
       case 'garden': act({ type: 'OP_GARDEN', choice: arg }); return;
       case 'suggest': act({ type: 'OP_ACCEPT_SUGGESTION', id: arg }); return;
       case 'end': act({ type: 'OP_END' }); return;
@@ -1934,6 +1983,7 @@
       case 'closeout-open': ui.closeoutOpen = true; ui.dirty = true; return;
       case 'closeout-close': ui.closeoutOpen = false; ui.dirty = true; return;
       case 'map-view': ui.mapView = arg; ui.dirty = true; return;
+      case 'brief-all': ui.briefAll = !ui.briefAll; ui.dirty = true; return;
     }
   }
 

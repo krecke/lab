@@ -10,12 +10,15 @@
 <body>
   <div class="app" id="app">
 
+    <!-- Prototype harness: drives the simulation. Not part of the console. -->
+    <div class="harness" id="harness" role="region" aria-label="Prototype playback (not part of the console)"></div>
+
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
           <div class="brand-name">DFR Console</div>
-          <div class="brand-sub">Kessmar Ops · Night shift · Prototype</div>
+          <div class="brand-sub">Kessmar Ops · Night shift</div>
         </div>
       </div>
 
@@ -33,7 +36,7 @@
 
       <div class="clock">
         <div class="clock-time num" data-live="clock">--:--:--</div>
-        <div class="clock-sub num"><span data-live="tplus">T+0:00</span><span class="condensed" id="condensed" hidden>Condensed <span data-live="condense-x"></span></span></div>
+        <div class="clock-sub">Local time</div>
       </div>
 
       <button class="btn btn-ghost audit-btn" data-action="toggle-audit" aria-controls="audit">
@@ -57,13 +60,19 @@
         </div>
         <div class="panel feed-panel">
           <div class="panel-head">
-            <h2 class="panel-title">Camera <span class="dim">· DR-03 · simulated thermal, top-down</span></h2>
-            <div class="feed-flags" id="feed-flags"></div>
+            <h2 class="panel-title"><span id="feed-title">Live view</span></h2>
+            <dl class="tele" aria-label="Drone telemetry">
+              <div><dt>Alt</dt><dd class="num" data-live="tel-alt"></dd></div>
+              <div><dt>Speed</dt><dd class="num" data-live="tel-speed"></dd></div>
+              <div><dt>Battery</dt><dd class="num" data-live="tel-bat"></dd></div>
+              <div><dt>Link</dt><dd class="num" data-live="tel-link"></dd></div>
+            </dl>
           </div>
           <div class="feed-wrap" id="feed-wrap">
-            <canvas id="feed" aria-label="Simulated thermal camera feed with detection boxes"></canvas>
+            <canvas id="feed" aria-label="Live thermal view from DR-03 (simulated), with detection boxes"></canvas>
             <div class="arm-hint" id="feed-hint" hidden></div>
           </div>
+          <div class="feed-tools" id="feed-tools" aria-label="Drone and camera controls"></div>
         </div>
       </section>
 
@@ -71,8 +80,6 @@
 
       <section class="closeout" id="closeout" hidden aria-label="Close-out summary"></section>
     </main>
-
-    <footer class="playback" id="playback" aria-label="Playback"></footer>
 
     <aside class="drawer" id="audit" hidden aria-label="Audit trail"></aside>
   </div>
