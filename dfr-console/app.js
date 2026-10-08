@@ -806,6 +806,7 @@
     if (ui.dirty || s.rev !== ui.lastRev) {
       ui.dirty = false;
       ui.lastRev = s.rev;
+      var focusKey = focusedAction();
       renderTopbar(s);
       renderLeft(s);
       renderContext(s);
@@ -815,10 +816,24 @@
       renderAudit(s);
       renderCloseout(s);
       renderHints();
+      restoreFocus(focusKey);
     }
     renderLive(s);
     renderMapDynamic(s);
     renderFeed(s);
+  }
+
+  /* Panels re-render as the scenario runs; keep keyboard focus on the same control. */
+  function focusedAction() {
+    var a = document.activeElement;
+    if (!a || !a.getAttribute || !a.getAttribute('data-action')) return null;
+    return { action: a.getAttribute('data-action'), arg: a.getAttribute('data-arg') };
+  }
+  function restoreFocus(k) {
+    if (!k || (document.activeElement && document.activeElement !== document.body)) return;
+    var sel = '[data-action="' + k.action + '"]' + (k.arg != null ? '[data-arg="' + k.arg + '"]' : '');
+    var el = document.querySelector(sel);
+    if (el && !el.disabled) el.focus({ preventScroll: true });
   }
 
   /* ---- shared bits ------------------------------------------------------ */
@@ -1961,6 +1976,10 @@
         if (ui.armed) { ui.armed = null; ui.dirty = true; }
         else if (ui.auditOpen) { ui.auditOpen = false; ui.dirty = true; }
       }
+    });
+
+    document.addEventListener('keyup', function (ev) {
+      if (ev.key === ' ' || ev.code === 'Space') ev.preventDefault();   // Space is play/pause, never a button press
     });
 
     window.addEventListener('resize', function () { ui.mapScale = null; ui.dirty = true; });
